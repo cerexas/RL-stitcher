@@ -186,7 +186,7 @@ def get_run_folder():
 run_folder = get_run_folder()  # Call it once at the beginning to get the current run folder
 
 
-IMAGE_PATH = 'United_States_004808.jpg'
+IMAGE_PATH = 'sample_image.jpg'
 low_res_image = Image.open(IMAGE_PATH).convert('L').resize((64, 64))
 low_res_image.save('low_res_image.jpg')
 
