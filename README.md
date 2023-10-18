@@ -6,14 +6,15 @@ This project provides an implementation of a Deep Q-Learning based agent to solv
 
 1. Clone this repository:
    ```bash
-   git clone [YOUR_REPOSITORY_URL]
-   cd [YOUR_REPOSITORY_NAME]
+   git clone https://github.com/cerexas/RL-stitcher.git
+   cd RL-stitcher
     ```
 
 
 2. Install the required packages:
+   ```bash
 pip install -r requirements.txt
-
+    ```
 
 ## Usage
 
