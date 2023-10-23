@@ -15,10 +15,13 @@ GAMMA = 0.99
 EPSILON = 0.80
 EPSILON_DECAY = 0.995
 MIN_EPSILON = 0.01
+GRID_SIZE = 3
+EPISODES = 1000
+IMAGE_PATH = 'sample_image.jpg'
 
 # Rescale images to fit display
 scale_factor = 5
-
+# Initialize vector to store steps taken per episode
 steps_per_episode = []
 
 class PuzzleEnvironment:
@@ -59,10 +62,10 @@ class PuzzleEnvironment:
         i, j = self.possible_swaps[action]
         i_row, i_col = i // self.grid_size, i % self.grid_size
         j_row, j_col = j // self.grid_size, j % self.grid_size
-
+        reward = 0
         # Check if the pieces involved in the swap are locked
         if self.locked_positions[i_row][i_col] or self.locked_positions[j_row][j_col]:
-            reward = -100
+            reward += -100
         else:
             previous_correct_count = sum([(self.state[i][j] == self.grid_size*i + j) for i in range(self.grid_size) for j in range(self.grid_size)])
 
@@ -73,9 +76,10 @@ class PuzzleEnvironment:
             
             # Check if the swap resulted in any progress
             if current_correct_count == previous_correct_count:
-                reward = -10  # Penalize no progress
+                reward += -10  # Penalize no progress
             else:
                 reward = current_correct_count * 15  # Giving higher reward for each correct piece
+                #reward = (1+current_correct_count)*10  # Giving higher reward for each correct piece
 
             # Lock the pieces that are in their correct positions
             for x in range(self.grid_size):
@@ -184,17 +188,11 @@ def get_run_folder():
         run_num += 1
 
 run_folder = get_run_folder()  # Call it once at the beginning to get the current run folder
-
-
-IMAGE_PATH = 'sample_image.jpg'
 low_res_image = Image.open(IMAGE_PATH).convert('L').resize((64, 64))
 low_res_image.save('low_res_image.jpg')
 
-GRID_SIZE = 3
 env = PuzzleEnvironment('low_res_image.jpg', grid_size=GRID_SIZE)
 agent = DQNAgent(GRID_SIZE*GRID_SIZE)
-
-EPISODES = 1000
 
 for episode in range(EPISODES):
     state = env.reset()
@@ -206,6 +204,8 @@ for episode in range(EPISODES):
         action = agent.choose_action(state)
         next_state, reward, done = env.step(action)
         steps += 1  # Increment step count
+        if(steps%50==0):
+            print(f"Current step: {steps}", end='\r')
         
         # Displaying the images side by side
         original_image = cv2.imread('low_res_image.jpg', cv2.IMREAD_GRAYSCALE)
