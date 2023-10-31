@@ -297,7 +297,7 @@ if __name__ == "__main__":
             plt.plot(steps_per_episode, marker='o', color='b')
 
             if(episode > 1):
-                x = np.arange(0, episode + 1)  # All episodes up to the current episode
+                x = np.arange(0, episode + 1)  # All episodes up to the current episode 
                 y = steps_per_episode  # All steps
                 trend_poly = np.polyfit(x, y, 1)
                 trend_line = np.poly1d(trend_poly)
