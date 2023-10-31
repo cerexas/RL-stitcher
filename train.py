@@ -1,28 +1,34 @@
-import numpy as np
+import os
+import cv2
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import random
-from PIL import Image
-import cv2
+import numpy as np
 import matplotlib.pyplot as plt
-import os
+from PIL import Image
 
 # Hyperparameters
-BATCH_SIZE = 64
+BATCH_SIZE = 256
 LR = 0.001
-GAMMA = 0.99
-EPSILON = 0.80
-EPSILON_DECAY = 0.995
-MIN_EPSILON = 0.01
-GRID_SIZE = 3
-EPISODES = 1000
-IMAGE_PATH = 'sample_image.jpg'
+GAMMA = 0.9
+EPISODES = 3000 # Number of episodes to train the agent for
+SAVE_PERIOD = 50 # Interval between saving model weights
+IMAGE_PATH = 'sample_image.jpg' # Path to the image used to train the agent
+GPU=False # Set to True if you want to use GPU, False otherwise
+## Epsilon
+usingEpsilonExploration = True
+EPSILON = 0.99 # Initial epsilon value (greedy epsilon decay)
+EPSILON_DECAY = 0.9995 # Epsilon decay rate
+MIN_EPSILON = 0.01 # Minimum value for epsilon 
+## Agent/display configuration
+GRID_SIZE = 2 # Size of the grid that splits the images
+IMG_RESIZE_RESOLUTION = 64*3 # Resolution the agent resizes the image to
+IMG_RESIZE_SCALE_FACTOR = 2 # Rescale images to fit display
 
-# Rescale images to fit display
-scale_factor = 5
+
 # Initialize vector to store steps taken per episode
-steps_per_episode = []
+steps_per_episode, trendlines, colors = [], [], []
 
 class PuzzleEnvironment:
     def __init__(self, image_path, grid_size=4):
@@ -65,7 +71,7 @@ class PuzzleEnvironment:
         reward = 0
         # Check if the pieces involved in the swap are locked
         if self.locked_positions[i_row][i_col] or self.locked_positions[j_row][j_col]:
-            reward += -100
+            reward += -1
         else:
             previous_correct_count = sum([(self.state[i][j] == self.grid_size*i + j) for i in range(self.grid_size) for j in range(self.grid_size)])
 
@@ -76,9 +82,9 @@ class PuzzleEnvironment:
             
             # Check if the swap resulted in any progress
             if current_correct_count == previous_correct_count:
-                reward += -10  # Penalize no progress
+                reward += -1  # Penalize no progress
             else:
-                reward = current_correct_count * 15  # Giving higher reward for each correct piece
+                reward += 5  # Giving higher reward for each correct piece
                 #reward = (1+current_correct_count)*10  # Giving higher reward for each correct piece
 
             # Lock the pieces that are in their correct positions
@@ -90,7 +96,7 @@ class PuzzleEnvironment:
         # Convert the state to a tuple and check if it has been visited
         state_tuple = tuple(self.state.flatten())
         if state_tuple in self.visited_states:
-            reward -= 20  # Penalize revisiting a state
+            reward -= 2  # Penalize revisiting a state
         else:
             # Add the current state to the visited_states
             self.visited_states.add(state_tuple)
@@ -124,30 +130,37 @@ class DQNNetwork(nn.Module):
 
 class DQNAgent:
     def __init__(self, input_size):
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")  # <-- Add this line
+        print(f"Using device: {self.device}")
         self.model = DQNNetwork(input_size, output_size=input_size * (input_size - 1) // 2)
+        self.model.to(self.device)  # Move model to GPU if available
         self.optimizer = optim.Adam(self.model.parameters(), lr=LR)
         self.criterion = nn.MSELoss()
         self.memory = []
 
     def choose_action(self, state):
+        global usingEpsilonExploration
         if random.random() > EPSILON:
-            state = torch.FloatTensor(state).view(1, -1)
-            q_values = self.model(state)
+            state_tensor = torch.FloatTensor(state).view(1, -1).to(self.device)
+            q_values = self.model(state_tensor)
+            usingEpsilonExploration = False
             return torch.argmax(q_values).item()
         else:
-            return random.randint(0, len(state)**2 - 2)
+            usingEpsilonExploration = True
+            return random.randint(0, GRID_SIZE*GRID_SIZE*(GRID_SIZE*GRID_SIZE-1)//2 - 1)
+
 
     def train(self):
         if len(self.memory) < BATCH_SIZE:
             return
-        
+        # Added replace = False to prevent sampling the same memory more than once
         batch = random.sample(self.memory, BATCH_SIZE)
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        states = torch.tensor(np.array(states), dtype=torch.float32)
-        actions = torch.LongTensor(actions)
-        rewards = torch.FloatTensor(rewards)
-        next_states = torch.tensor(np.array(next_states), dtype=torch.float32)
+        states = torch.tensor(np.array(states), dtype=torch.float32).to(self.device)  # Move tensors to GPU
+        actions = torch.LongTensor(actions).to(self.device)
+        rewards = torch.FloatTensor(rewards).to(self.device)
+        next_states = torch.tensor(np.array(next_states), dtype=torch.float32).to(self.device)
 
         current_q_values = self.model(states).gather(1, actions.unsqueeze(-1))
         next_q_values = self.model(next_states).max(1)[0].detach()
@@ -159,6 +172,33 @@ class DQNAgent:
         self.optimizer.step()
 
         #print(f"Episode: {episode}, Time in last episode: {elapsed_time} Training loss: {loss.item()}")
+    def save_model(self, path):  # Modified to handle device transitions
+        if not os.path.exists(os.path.dirname(path)):  # Check if the parent directory of the path exists
+            os.makedirs(os.path.dirname(path))  # If not, create the directory
+
+        self.model.cpu()  # Move to CPU before saving
+        torch.save(self.model.state_dict(), path)
+        self.model.to(self.device)
+
+def log_hyperparameters():
+    hyperparameters = {
+        "BATCH_SIZE": BATCH_SIZE,
+        "LR": LR,
+        "GAMMA": GAMMA,
+        "EPISODES": EPISODES,
+        "SAVE_PERIOD": SAVE_PERIOD,
+        "IMAGE_PATH": IMAGE_PATH,
+        "GPU": GPU,
+        "EPSILON": EPSILON,
+        "EPSILON_DECAY": EPSILON_DECAY,
+        "MIN_EPSILON": MIN_EPSILON,
+        "GRID_SIZE": GRID_SIZE,
+        "IMG_RESIZE_SCALE_FACTOR": IMG_RESIZE_SCALE_FACTOR
+    }
+    
+    with open(os.path.join(run_folder, "settings_used.txt"), 'w') as f:
+        for k, v in hyperparameters.items():
+            f.write(f"{k}: {v}\n")
 
 def shade_correct_pieces(image, grid_size, chunk_size, state):
     """Shades the correct pieces of the puzzle with a green tint."""
@@ -188,32 +228,41 @@ def get_run_folder():
         run_num += 1
 
 run_folder = get_run_folder()  # Call it once at the beginning to get the current run folder
-low_res_image = Image.open(IMAGE_PATH).convert('L').resize((64, 64))
+low_res_image = Image.open(IMAGE_PATH).convert('L').resize((IMG_RESIZE_RESOLUTION, IMG_RESIZE_RESOLUTION))
 low_res_image.save('low_res_image.jpg')
 
 env = PuzzleEnvironment('low_res_image.jpg', grid_size=GRID_SIZE)
 agent = DQNAgent(GRID_SIZE*GRID_SIZE)
 
+# Log hyperparameters to the run folder
+log_hyperparameters()
+
 for episode in range(EPISODES):
     state = env.reset()
     done = False
     steps = 0  # Initialize steps count for this episode
-
     EPSILON = max(MIN_EPSILON, EPSILON * EPSILON_DECAY)
+
+    # Save every N-th episode
+    if (episode + 1) % SAVE_PERIOD == 0:
+        save_path = os.path.join(run_folder, "weights", f"model_ep{episode+1}.pth")
+        agent.save_model(save_path)
+        print(f"Saved model weights at episode {episode + 1} to {save_path}")
+
     while not done:
         action = agent.choose_action(state)
         next_state, reward, done = env.step(action)
         steps += 1  # Increment step count
         if(steps%50==0):
             print(f"Current step: {steps}", end='\r')
-        
+
         # Displaying the images side by side
         original_image = cv2.imread('low_res_image.jpg', cv2.IMREAD_GRAYSCALE)
         current_puzzle_image = np.array(env.get_current_image())
         current_puzzle_image = shade_correct_pieces(current_puzzle_image, GRID_SIZE, env.chunk_size, env.state)
 
-        original_image = cv2.resize(original_image, (original_image.shape[1] * scale_factor, original_image.shape[0] * scale_factor))
-        current_puzzle_image = cv2.resize(current_puzzle_image, (current_puzzle_image.shape[1] * scale_factor, current_puzzle_image.shape[0] * scale_factor))
+        original_image = cv2.resize(original_image, (original_image.shape[1] * IMG_RESIZE_SCALE_FACTOR, original_image.shape[0] * IMG_RESIZE_SCALE_FACTOR))
+        current_puzzle_image = cv2.resize(current_puzzle_image, (current_puzzle_image.shape[1] * IMG_RESIZE_SCALE_FACTOR, current_puzzle_image.shape[0] * IMG_RESIZE_SCALE_FACTOR))
 
         combined_image = np.hstack((original_image, current_puzzle_image))
         cv2.imshow("Original vs Current", combined_image)
@@ -225,17 +274,32 @@ for episode in range(EPISODES):
         state = next_state
         
     steps_per_episode.append(steps)  # Append step count for this episode
-    print(f"Episode: {episode + 1}, Epsilon: {EPSILON}, Steps taken: {steps}")  # Display steps taken in this episode
+    print(f"Episode: {episode + 1}, Epsilon: {EPSILON}, Steps taken: {steps}, Exploration: {usingEpsilonExploration}" )  # Display steps taken in this episode
+
+    exploration_color = 'g' if usingEpsilonExploration else 'r'  # Green if usingEpsilonExploration is True, otherwise red
+    colors.append(exploration_color)
 
     plt.figure(figsize=(10,5))
     plt.plot(steps_per_episode, marker='o', color='b')
-    plt.title('Steps Taken per Episode')
-    plt.xlabel('Episode')
-    plt.ylabel('Steps')
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+
+    if(episode > 1):
+        x = np.arange(0, episode + 1)  # All episodes up to the current episode
+        y = steps_per_episode  # All steps
+        trend_poly = np.polyfit(x, y, 1)
+        trend_line = np.poly1d(trend_poly)
+        trendlines.append((x, trend_line(x)))
+
+    # Only plot the last trendline
+    if len(trendlines) > 0:
+        x, trend = trendlines[-1]
+        plt.plot(x, trend, color='r', linestyle="--")
+
+    plt.xlabel("Episode")
+    plt.ylabel("Steps")
+    plt.title("Steps per Episode")
     plt.tight_layout()
-    chart_path = os.path.join(run_folder, "progress_chart.png")  # Save it in the current run folder
-    plt.savefig(chart_path)
-    plt.close()  # Close the plot to free up resources
+    # plt.savefig(os.path.join(run_folder, f"plot_episode_{episode + 1}.png"))
+    plt.savefig(os.path.join(run_folder, "progress_chart.png"))# Save it in the current run folder
+    plt.close()
 
 cv2.destroyAllWindows()
