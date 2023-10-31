@@ -230,85 +230,89 @@ def get_run_folder():
     while True:
         folder_name = os.path.join(base_folder, str(run_num))
         if not os.path.exists(folder_name):
-            os.makedirs(folder_name)  # Create the folder
+            os.makedirs(folder_name)
             return folder_name
         run_num += 1
 
-run_folder = get_run_folder()  # Call it once at the beginning to get the current run folder
-low_res_image = Image.open(IMAGE_PATH).convert('L').resize((IMG_RESIZE_RESOLUTION, IMG_RESIZE_RESOLUTION))
-low_res_image.save('low_res_image.jpg')
 
-env = PuzzleEnvironment('low_res_image.jpg', grid_size=GRID_SIZE)
-agent = DQNAgent(GRID_SIZE*GRID_SIZE)
 
-# Log hyperparameters to the run folder
-log_hyperparameters()
+if __name__ == "__main__":
+    # Preprocess the image and initialize the save folder
+    run_folder = get_run_folder() 
+    low_res_image = Image.open(IMAGE_PATH).convert('L').resize((IMG_RESIZE_RESOLUTION, IMG_RESIZE_RESOLUTION))
+    low_res_image.save('low_res_image.jpg')
 
-for episode in range(EPISODES):
-    state = env.reset()
-    done = False
-    steps = 0  # Initialize steps count for this episode
-    EPSILON = max(MIN_EPSILON, EPSILON * EPSILON_DECAY)
+    # Log hyperparameters to the run folder
+    log_hyperparameters()
 
-    # Save every N-th episode
-    if (episode + 1) % SAVE_PERIOD == 0:
-        save_path = os.path.join(run_folder, "weights", f"model_ep{episode+1}.pth")
-        agent.save_model(save_path)
-        print(f"Saved model weights at episode {episode + 1} to {save_path}")
+    # Initialize the environment and agent
+    env = PuzzleEnvironment('low_res_image.jpg', grid_size=GRID_SIZE)
+    agent = DQNAgent(GRID_SIZE*GRID_SIZE)
 
-    while not done:
-        action = agent.choose_action(state)
-        next_state, reward, done = env.step(action)
-        steps += 1  # Increment step count
-        if(steps%50==0):
-            print(f"Current step: {steps}", end='\r')
+    for episode in range(EPISODES):
+        state = env.reset()
+        done = False
+        steps = 0  # Initialize steps count for this episode
+        EPSILON = max(MIN_EPSILON, EPSILON * EPSILON_DECAY)
 
-        # Displaying the images side by side
-        original_image = cv2.imread('low_res_image.jpg', cv2.IMREAD_GRAYSCALE)
-        current_puzzle_image = np.array(env.get_current_image())
-        current_puzzle_image = shade_correct_pieces(current_puzzle_image, GRID_SIZE, env.chunk_size, env.state)
+        # Save every N-th episode
+        if (episode + 1) % SAVE_PERIOD == 0:
+            save_path = os.path.join(run_folder, "weights", f"model_ep{episode+1}.pth")
+            agent.save_model(save_path)
+            print(f"Saved model weights at episode {episode + 1} to {save_path}")
 
-        original_image = cv2.resize(original_image, (original_image.shape[1] * IMG_RESIZE_SCALE_FACTOR, original_image.shape[0] * IMG_RESIZE_SCALE_FACTOR))
-        current_puzzle_image = cv2.resize(current_puzzle_image, (current_puzzle_image.shape[1] * IMG_RESIZE_SCALE_FACTOR, current_puzzle_image.shape[0] * IMG_RESIZE_SCALE_FACTOR))
+        while not done:
+            action = agent.choose_action(state)
+            next_state, reward, done = env.step(action)
+            steps += 1  # Increment step count
+            if(steps%50==0):
+                print(f"Current step: {steps}", end='\r')
 
-        combined_image = np.hstack((original_image, current_puzzle_image))
-        cv2.imshow("Original vs Current", combined_image)
-        cv2.waitKey(1)  # Display it for a short duration. Change to higher value if you want longer pauses.
-        
-        # Potential memory leak here:
-        #agent.memory.append((state.flatten(), action, reward, next_state.flatten(), done))
-        agent.add_memory((state.flatten(), action, reward, next_state.flatten(), done))
-        agent.train()
+            # Displaying the images side by side
+            original_image = cv2.imread('low_res_image.jpg', cv2.IMREAD_GRAYSCALE)
+            current_puzzle_image = np.array(env.get_current_image())
+            current_puzzle_image = shade_correct_pieces(current_puzzle_image, GRID_SIZE, env.chunk_size, env.state)
 
-        state = next_state
-        
-    steps_per_episode.append(steps)  # Append step count for this episode
-    print(f"Episode: {episode + 1}, Epsilon: {EPSILON}, Steps taken: {steps}, Exploration: {usingEpsilonExploration}" )  # Display steps taken in this episode
+            original_image = cv2.resize(original_image, (original_image.shape[1] * IMG_RESIZE_SCALE_FACTOR, original_image.shape[0] * IMG_RESIZE_SCALE_FACTOR))
+            current_puzzle_image = cv2.resize(current_puzzle_image, (current_puzzle_image.shape[1] * IMG_RESIZE_SCALE_FACTOR, current_puzzle_image.shape[0] * IMG_RESIZE_SCALE_FACTOR))
 
-    exploration_color = 'g' if usingEpsilonExploration else 'r'  # Green if usingEpsilonExploration is True, otherwise red
-    colors.append(exploration_color)
+            combined_image = np.hstack((original_image, current_puzzle_image))
+            cv2.imshow("Original vs Current", combined_image)
+            cv2.waitKey(1)  # Display it for a short duration. Change to higher value if you want longer pauses.
+            
+            # Potential memory leak here:
+            #agent.memory.append((state.flatten(), action, reward, next_state.flatten(), done))
+            agent.add_memory((state.flatten(), action, reward, next_state.flatten(), done))
+            agent.train()
 
-    plt.figure(figsize=(10,5))
-    plt.plot(steps_per_episode, marker='o', color='b')
+            state = next_state
+            
+        steps_per_episode.append(steps)  # Append step count for this episode
+        print(f"Episode: {episode + 1}, Epsilon: {EPSILON}, Steps taken: {steps}, Exploration: {usingEpsilonExploration}" )  # Display steps taken in this episode
 
-    if(episode > 1):
-        x = np.arange(0, episode + 1)  # All episodes up to the current episode
-        y = steps_per_episode  # All steps
-        trend_poly = np.polyfit(x, y, 1)
-        trend_line = np.poly1d(trend_poly)
-        trendlines.append((x, trend_line(x)))
+        exploration_color = 'g' if usingEpsilonExploration else 'r'  # Green if usingEpsilonExploration is True, otherwise red
+        colors.append(exploration_color)
+        if (episode%50) == 0:
+            plt.figure(figsize=(10,5))
+            plt.plot(steps_per_episode, marker='o', color='b')
 
-    # Only plot the last trendline
-    if len(trendlines) > 0:
-        x, trend = trendlines[-1]
-        plt.plot(x, trend, color='r', linestyle="--")
+            if(episode > 1):
+                x = np.arange(0, episode + 1)  # All episodes up to the current episode
+                y = steps_per_episode  # All steps
+                trend_poly = np.polyfit(x, y, 1)
+                trend_line = np.poly1d(trend_poly)
+                trendlines.append((x, trend_line(x)))
 
-    plt.xlabel("Episode")
-    plt.ylabel("Steps")
-    plt.title("Steps per Episode")
-    plt.tight_layout()
-    # plt.savefig(os.path.join(run_folder, f"plot_episode_{episode + 1}.png"))
-    plt.savefig(os.path.join(run_folder, "progress_chart.png"))# Save it in the current run folder
-    plt.close()
+            # Only plot the last trendline
+            if len(trendlines) > 0:
+                x, trend = trendlines[-1]
+                plt.plot(x, trend, color='r', linestyle="--")
 
-cv2.destroyAllWindows()
+            plt.xlabel("Episode")
+            plt.ylabel("Steps")
+            plt.title("Steps per Episode")
+            plt.tight_layout()
+            plt.savefig(os.path.join(run_folder, "progress_chart.png"))
+            plt.close()
+
+    cv2.destroyAllWindows()
