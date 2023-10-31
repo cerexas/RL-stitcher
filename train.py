@@ -10,6 +10,7 @@ from PIL import Image
 
 # Hyperparameters
 BATCH_SIZE = 256
+MAX_MEMORY_SIZE = 10000
 LR = 0.001
 GAMMA = 0.9
 EPISODES = 3000 # Number of episodes to train the agent for
@@ -149,7 +150,13 @@ class DQNAgent:
             usingEpsilonExploration = True
             return random.randint(0, GRID_SIZE*GRID_SIZE*(GRID_SIZE*GRID_SIZE-1)//2 - 1)
 
-
+    def add_memory(self, memory):
+        if len(self.memory) < MAX_MEMORY_SIZE:
+            self.memory.append(memory)
+        else:
+            self.memory.pop(0)  # remove the oldest memory
+            self.memory.append(memory)
+    
     def train(self):
         if len(self.memory) < BATCH_SIZE:
             return
@@ -268,7 +275,9 @@ for episode in range(EPISODES):
         cv2.imshow("Original vs Current", combined_image)
         cv2.waitKey(1)  # Display it for a short duration. Change to higher value if you want longer pauses.
         
-        agent.memory.append((state.flatten(), action, reward, next_state.flatten(), done))
+        # Potential memory leak here:
+        #agent.memory.append((state.flatten(), action, reward, next_state.flatten(), done))
+        agent.add_memory((state.flatten(), action, reward, next_state.flatten(), done))
         agent.train()
 
         state = next_state
